@@ -21,6 +21,7 @@ from poker44.utils.model_manifest import (
 )
 from poker44.validator.synapse import DetectionSynapse
 from poker44_model import score_chunk
+from poker44_model.capture import save_capture
 
 
 class Miner(BaseMinerNeuron):
@@ -38,6 +39,7 @@ class Miner(BaseMinerNeuron):
             repo_root / "poker44_model" / "detector.py",
             repo_root / "poker44_model" / "features.py",
             repo_root / "poker44_model" / "model.json",
+            repo_root / "poker44_model" / "capture.py",
         ]
         # Identity defaults below are overridden by POKER44_MODEL_* env vars
         # (see miner.env.example). repo_url is intentionally left blank so a
@@ -105,6 +107,18 @@ class Miner(BaseMinerNeuron):
         synapse.predictions = [s >= 0.5 for s in scores]
         synapse.model_manifest = dict(self.model_manifest)
         bt.logging.info(f"Scored {len(chunks)} chunks; predictions={synapse.predictions}")
+        try:
+            save_capture(
+                chunks, scores, synapse.predictions,
+                model_name=self.model_manifest.get("model_name", ""),
+                model_version=self.model_manifest.get("model_version", ""),
+                impl_sha256=self.model_manifest.get("implementation_sha256", ""),
+                uid=getattr(self, "uid", None),
+                hotkey=getattr(getattr(self, "wallet", None), "hotkey", None)
+                and self.wallet.hotkey.ss58_address,
+            )
+        except Exception:
+            pass
         return synapse
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:

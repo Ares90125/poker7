@@ -215,3 +215,6 @@ wandb/
 
 # Poker44 fork: local operator config (never commit)
 miner.env
+
+# Poker44 fork: captured live eval chunks/scores (runtime output)
+poker44_model/captures/
