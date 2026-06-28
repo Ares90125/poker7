@@ -1,9 +1,10 @@
-"""Participant-owned model package for the Poker44 miner.
+"""Participant-owned model package for the Poker44 miner (uid7).
 
-Build your bot detector in `detector.py`. Keep everything model-related inside
-this package so upstream merges into the rest of the repo stay conflict-free.
+Bot detector = logistic regression over behavioral features. See detector.py
+(inference), features.py (feature extraction), train_model.py (reproducible
+training), and model.json (learned parameters).
 """
 
-from poker44_model.detector import clamp01, score_chunk, score_hand
+from poker44_model.detector import score_chunk
 
-__all__ = ["clamp01", "score_chunk", "score_hand"]
+__all__ = ["score_chunk"]

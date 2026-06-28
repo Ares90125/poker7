@@ -36,6 +36,8 @@ class Miner(BaseMinerNeuron):
             Path(__file__).resolve(),
             repo_root / "poker44_model" / "__init__.py",
             repo_root / "poker44_model" / "detector.py",
+            repo_root / "poker44_model" / "features.py",
+            repo_root / "poker44_model" / "model.json",
         ]
         # Identity defaults below are overridden by POKER44_MODEL_* env vars
         # (see miner.env.example). repo_url is intentionally left blank so a
@@ -45,12 +47,12 @@ class Miner(BaseMinerNeuron):
             repo_root=repo_root,
             implementation_files=implementation_files,
             defaults={
-                "model_name": "poker44-uid-model",
+                "model_name": "poker7-logistic-v1",
                 "model_version": "1",
-                "framework": "python-heuristic",
+                "framework": "scikit-learn-logistic",
                 "license": "MIT",
                 "repo_url": "",
-                "notes": "Poker44 miner. Model logic lives in poker44_model/.",
+                "notes": "Logistic-regression bot detector over behavioral features (poker44_model/).",
                 "open_source": True,
                 "inference_mode": "remote",
                 "training_data_statement": (
