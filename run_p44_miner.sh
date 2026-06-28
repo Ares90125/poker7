@@ -38,4 +38,5 @@ case "${POKER44_MODEL_REPO_URL:-}" in
     ;;
 esac
 
-exec ./scripts/miner/run/run_miner.sh
+# Use `bash` so this works even though run_miner.sh is tracked non-executable (mode 644).
+exec bash ./scripts/miner/run/run_miner.sh

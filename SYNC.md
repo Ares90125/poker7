@@ -35,13 +35,19 @@ in `[0, 1]` per chunk (higher = more bot-like). Put extra dependencies in
 
 ## Fresh clone on a new machine
 
+A plain clone has **no push credential**, so set it before `./sync.sh` (which pushes):
+
 ```bash
 git clone https://github.com/Ares90125/poker7.git
 cd poker7
-git config credential.helper store   # then the first push stores your token
-cp miner.env.example miner.env
+# embed your token so pushes work non-interactively (or use SSH / a credential helper):
+git remote set-url origin https://<YOUR_TOKEN>@github.com/Ares90125/poker7.git
+cp miner.env.example miner.env       # fill in wallet/hotkey
 ./sync.sh                            # auto-adds the upstream remote on first run
 ```
+
+After a server **reboot**, relaunch with `./run_p44_miner.sh` — don't rely on PM2
+auto-resurrect, which can replay a stale commit identity.
 
 > Identity rule: `POKER44_MODEL_REPO_URL` must be **this** repo (already set in
 > `miner.env.example`), never the `Poker44/Poker44-subnet` reference repo, and the
