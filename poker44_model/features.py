@@ -1,110 +1,200 @@
-"""Behavioral feature extraction over a chunk GROUP (list of ~30 hands).
+"""v3 features: behavioral + entropy + duplication-signature features over a
+chunk (list of ~hands). Distribution-robust: bb-normalized amounts, shares,
+entropy, run-length and signature features (relative quantities that transfer
+live), avoiding absolute-level columns that collapse on the live eval.
 
-Uses ONLY fields present in the live miner-visible payload. Note the live
-sanitizer zeroes `outcome` (no showdown/pot), strips hole/board cards, fixes
-bb=0.02, and shows only a sampled action window — so the signal here is action
-types, bet-sizing relative to pot, pot dynamics, stacks, and street depth.
+Adopts the proven approach used by the top miners (entropy + cross-hand
+signature/duplication detection + quantile aggregates), reimplemented cleanly.
 """
 from __future__ import annotations
 
 import math
 from collections import Counter
 
-ACTION_TYPES = ("fold", "check", "call", "bet", "raise")
-STREETS = ("preflop", "flop", "turn", "river")
-_CANON = (0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0)
+BB = 0.02  # visible big blind in the sanitized payload
 
 
-def _pstd(xs):
-    if len(xs) < 2:
+def _f(v, d=0.0):
+    try:
+        return d if v is None else float(v)
+    except (TypeError, ValueError):
+        return d
+
+
+def _i(v, d=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return d
+
+
+def _div(a, b):
+    return a / b if b else 0.0
+
+
+def _entropy(xs):
+    if not xs:
         return 0.0
-    m = sum(xs) / len(xs)
-    return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))
+    c = Counter(xs)
+    if len(c) <= 1:
+        return 0.0
+    tot = float(sum(c.values()))
+    e = -sum((n / tot) * math.log(n / tot + 1e-12) for n in c.values())
+    return _div(e, math.log(len(c)))
 
 
-def hand_features(h):
-    acts = h.get("actions") or []
-    players = h.get("players") or []
-    cnt = Counter(a.get("action_type") for a in acts)
-    n = max(1, sum(cnt.get(k, 0) for k in ACTION_TYPES))
-    streets_seen = {str(a.get("street") or "").lower() for a in acts}
-    depth = sum(1 for s in STREETS if s in streets_seen)
-    aggr = cnt.get("bet", 0) + cnt.get("raise", 0)
-    passive = cnt.get("call", 0) + cnt.get("check", 0)
+def _quant(xs, q):
+    if not xs:
+        return 0.0
+    s = sorted(float(x) for x in xs)
+    if len(s) == 1:
+        return s[0]
+    pos = min(max(q, 0.0), 1.0) * (len(s) - 1)
+    lo, hi = int(math.floor(pos)), int(math.ceil(pos))
+    return s[lo] if lo == hi else s[lo] * (1 - (pos - lo)) + s[hi] * (pos - lo)
 
-    sizes = []
-    betpot = []
-    last_pot = 0.0
-    pre_a = pre_n = post_a = post_n = limp = 0
-    for a in acts:
-        t = a.get("action_type")
-        s = str(a.get("street") or "").lower()
-        amt = float(a.get("normalized_amount_bb") or 0.0)
-        pf = float(a.get("pot_before") or 0.0)
-        pa = float(a.get("pot_after") or 0.0)
-        last_pot = max(last_pot, pa)
-        is_aggr = 1 if t in ("bet", "raise") else 0
-        if s == "preflop":
-            pre_n += 1; pre_a += is_aggr
-            if t == "call":
-                limp += 1
-        else:
-            post_n += 1; post_a += is_aggr
-        if t in ("bet", "raise"):
-            sizes.append(amt)
-            if pf > 0:
-                betpot.append((amt * 0.02) / pf)
-    cluster = [min(abs(b - c) for c in _CANON) for b in betpot] if betpot else []
-    distinct = (len(set(round(x, 1) for x in sizes)) / len(sizes)) if sizes else 0.0
-    bm = (sum(sizes) / len(sizes)) if sizes else 0.0
-    bs = _pstd(sizes)
-    stacks = [float(p.get("starting_stack") or 0.0) for p in players]
+
+def _mean(xs):
+    return _div(sum(xs), len(xs))
+
+
+def _std(xs):
+    if not xs:
+        return 0.0
+    m = _mean(xs)
+    return math.sqrt(max(0.0, _mean([(x - m) ** 2 for x in xs])))
+
+
+def _run_max_share(xs):
+    if not xs:
+        return 0.0
+    longest = cur = 1
+    for a, b in zip(xs, xs[1:]):
+        cur = cur + 1 if a == b else 1
+        longest = max(longest, cur)
+    return _div(longest, len(xs))
+
+
+def _amt_bucket(v):
+    if v <= 0.0:
+        return "z"
+    for thr, tag in ((0.5, "xs"), (1.0, "s"), (2.0, "m"), (5.0, "l")):
+        if v <= thr:
+            return tag
+    return "xl"
+
+
+def hand_features(hand):
+    meta = hand.get("metadata") or {}
+    players = hand.get("players") or []
+    streets = hand.get("streets") or []
+    actions = hand.get("actions") or []
+    max_seats = max(1, _i(meta.get("max_seats"), 6))
+    hero = _i(meta.get("hero_seat"), 0)
+    button = _i(meta.get("button_seat"), 0)
+
+    atypes, actors, snames, amt, pb, pa = [], [], [], [], [], []
+    raise_to = call_to = 0
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        atypes.append(str(a.get("action_type") or "").lower().strip())
+        s = _i(a.get("actor_seat"), 0)
+        if s > 0:
+            actors.append(s)
+        snames.append(str(a.get("street") or "").lower().strip())
+        amt.append(max(0.0, _f(a.get("normalized_amount_bb"))))
+        pb.append(max(0.0, _div(_f(a.get("pot_before")), BB)))
+        pa.append(max(0.0, _div(_f(a.get("pot_after")), BB)))
+        raise_to += int(a.get("raise_to") is not None)
+        call_to += int(a.get("call_to") is not None)
+    stacks = [_div(_f(p.get("starting_stack")), BB) for p in players if isinstance(p, dict)]
+
+    c = Counter(atypes)
+    nact = max(1.0, float(len(actions)))
+    meaningful = max(1, sum(c.get(k, 0) for k in ("call", "check", "bet", "raise", "fold")))
+    aggr = c.get("bet", 0) + c.get("raise", 0)
+    passive = c.get("call", 0) + c.get("check", 0)
+    pre = sum(1 for s in snames if s == "preflop")
+    post = sum(1 for s in snames if s not in ("", "preflop"))
+    pdelta = [max(0.0, x - y) for x, y in zip(pa, pb)]
+    mono = sum(1 for x, y in zip(pa, pa[1:]) if y + 1e-9 >= x)
 
     return {
-        "n_act": float(len(acts)),
-        "depth": float(depth),
-        "fold_r": cnt.get("fold", 0) / n,
-        "check_r": cnt.get("check", 0) / n,
-        "call_r": cnt.get("call", 0) / n,
-        "bet_r": cnt.get("bet", 0) / n,
-        "raise_r": cnt.get("raise", 0) / n,
-        "aggr_f": aggr / (passive + 1.0),
-        "n_players": float(len(players)),
-        "stack_mean": (sum(stacks) / len(stacks)) if stacks else 0.0,
-        "stack_std": _pstd(stacks),
-        "bet_mean": bm,
-        "bet_std": bs,
-        "bet_max": max(sizes) if sizes else 0.0,
-        "betpot_mean": (sum(betpot) / len(betpot)) if betpot else 0.0,
-        "betpot_std": _pstd(betpot),
-        "final_pot_bb": last_pot / 0.02,
-        "n_sizes": float(len(sizes)),
-        "pre_aggr_r": pre_a / max(1, pre_n),
-        "post_aggr_r": post_a / max(1, post_n),
-        "limp_r": limp / max(1, pre_n),
-        "betpot_cluster": (sum(cluster) / len(cluster)) if cluster else 0.5,
-        "bet_cov": (bs / bm) if bm > 1e-6 else 0.0,
-        "distinct_sizes": distinct,
+        "player_count": float(len(players)),
+        "seat_util": _div(len(players), max_seats),
+        "action_count": float(len(actions)),
+        "street_count": float(len(streets)),
+        "call_sh": _div(c.get("call", 0), meaningful),
+        "check_sh": _div(c.get("check", 0), meaningful),
+        "fold_sh": _div(c.get("fold", 0), meaningful),
+        "bet_sh": _div(c.get("bet", 0), meaningful),
+        "raise_sh": _div(c.get("raise", 0), meaningful),
+        "aggr_sh": _div(aggr, nact),
+        "passive_sh": _div(passive, nact),
+        "preflop_sh": _div(pre, nact),
+        "postflop_sh": _div(post, nact),
+        "action_entropy": _entropy(atypes),
+        "actor_entropy": _entropy(actors),
+        "street_entropy": _entropy(snames),
+        "unique_actor_sh": _div(len(set(actors)), max(1.0, len(players))),
+        "actor_switch_rate": _div(sum(1 for x, y in zip(actors, actors[1:]) if x != y), max(len(actors) - 1, 1)),
+        "actor_run_max": _run_max_share(actors),
+        "action_run_max": _run_max_share(atypes),
+        "amt_mean": _mean(amt),
+        "amt_std": _std(amt),
+        "amt_q90": _quant(amt, 0.9),
+        "nonzero_amt_sh": _div(sum(1 for v in amt if v > 0), nact),
+        "pot_delta_mean": _mean(pdelta),
+        "pot_growth": (max(pa) - min(pb)) if pa and pb else 0.0,
+        "pot_monotonic": _div(mono, max(len(pa) - 1, 1)),
+        "raise_to_sh": _div(raise_to, nact),
+        "call_to_sh": _div(call_to, nact),
+        "stack_std": _std(stacks),
+        "stack_iqr": _quant(stacks, 0.75) - _quant(stacks, 0.25),
+        "hero_action_sh": _div(sum(1 for s in actors if s == hero and hero > 0), nact),
+        "button_action_sh": _div(sum(1 for s in actors if s == button and button > 0), nact),
     }
 
 
-PERHAND = ["n_act", "depth", "fold_r", "check_r", "call_r", "bet_r", "raise_r",
-           "aggr_f", "n_players", "stack_mean", "stack_std", "bet_mean", "bet_std",
-           "bet_max", "betpot_mean", "betpot_std", "final_pot_bb", "n_sizes",
-           "pre_aggr_r", "post_aggr_r", "limp_r", "betpot_cluster", "bet_cov",
-           "distinct_sizes"]
+PERHAND = sorted(hand_features({"metadata": {}, "players": [], "streets": [], "actions": []}).keys())
+_AGG = ("mean", "std", "min", "max", "q10", "q50", "q90")
 
 
-def extract_group_features(group):
-    """Return {feature_name: value}: mean & std of each per-hand feature."""
-    rows = [hand_features(h) for h in group]
-    feats = {}
-    for k in PERHAND:
-        vals = [r[k] for r in rows]
-        feats[f"{k}_m"] = (sum(vals) / len(vals)) if vals else 0.0
-        feats[f"{k}_s"] = _pstd(vals)
-    feats["hands"] = float(len(group))
-    return feats
+def chunk_features(chunk):
+    if not chunk:
+        return {"hand_count": 0.0}
+    out = {"hand_count": float(len(chunk))}
+    rows = [hand_features(h) for h in chunk]
+    for name in PERHAND:
+        xs = [r[name] for r in rows]
+        out[f"{name}_mean"] = _mean(xs)
+        out[f"{name}_std"] = _std(xs)
+        out[f"{name}_min"] = min(xs) if xs else 0.0
+        out[f"{name}_max"] = max(xs) if xs else 0.0
+        out[f"{name}_q10"] = _quant(xs, 0.1)
+        out[f"{name}_q50"] = _quant(xs, 0.5)
+        out[f"{name}_q90"] = _quant(xs, 0.9)
+
+    asig, ksig, ssig, bsig = [], [], [], []
+    low_ent = high_actor_ent = long_hand = 0
+    for h, r in zip(chunk, rows):
+        acts = h.get("actions") or []
+        asig.append(tuple(str((a or {}).get("action_type") or "").lower() for a in acts))
+        ksig.append(tuple(_i((a or {}).get("actor_seat"), 0) for a in acts if _i((a or {}).get("actor_seat"), 0) > 0))
+        ssig.append(tuple(str((a or {}).get("street") or "").lower() for a in acts))
+        bsig.append(tuple(_amt_bucket(max(0.0, _f((a or {}).get("normalized_amount_bb")))) for a in acts))
+        low_ent += int(r["action_entropy"] <= 0.35)
+        high_actor_ent += int(r["actor_entropy"] >= 0.75)
+        long_hand += int(r["action_count"] >= 12.0)
+    n = float(len(chunk))
+    for tag, sig in (("action", asig), ("actor", ksig), ("street", ssig), ("amtbucket", bsig)):
+        out[f"sig_{tag}_top_share"] = _div(max(Counter(sig).values()), n)
+        out[f"sig_{tag}_unique_share"] = _div(len(set(sig)), n)
+    out["low_action_entropy_rate"] = _div(low_ent, n)
+    out["high_actor_entropy_rate"] = _div(high_actor_ent, n)
+    out["long_action_hand_rate"] = _div(long_hand, n)
+    return out
 
 
-FEATURE_NAMES = [f"{k}_m" for k in PERHAND] + [f"{k}_s" for k in PERHAND] + ["hands"]
+FEATURE_NAMES = sorted(chunk_features([{"metadata": {}, "players": [], "streets": [], "actions": [{"action_type": "x"}]}]).keys())
