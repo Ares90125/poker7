@@ -1,12 +1,10 @@
 """Reproducible training for the uid7 logistic detector → writes model.json.
 
-Requires the public benchmark (see ../train or the project's train/ folder) and
-sklearn (`pip install -e .`). Usage from the repo root:
+Robust pipeline: winsorize features to the benchmark 1st-99th percentile, then
+standardize, then logistic regression. Inference ranks the raw logits within
+each query batch. Requires the public benchmark + sklearn (`pip install -e .`).
 
     python3 poker44_model/train_model.py --data /root/ares/Poker/train/raw
-
-Trains on the benchmark `train` split. Evaluate on the `validation` split with
-the subnet reward metric (0.75*AP + 0.25*recall@FPR<=0.05).
 """
 from __future__ import annotations
 
@@ -42,12 +40,17 @@ def main():
     X = np.array([[extract_group_features(g)[k] for k in FEATURE_NAMES] for g, _ in tr])
     y = np.array([l for _, l in tr])
 
-    scaler = StandardScaler().fit(X)
-    clf = LogisticRegression(C=0.5, max_iter=3000).fit(scaler.transform(X), y)
+    lo = np.percentile(X, 1, axis=0)
+    hi = np.percentile(X, 99, axis=0)
+    Xw = np.clip(X, lo, hi)
+    scaler = StandardScaler().fit(Xw)
+    clf = LogisticRegression(C=0.5, max_iter=3000).fit(scaler.transform(Xw), y)
 
     model = {
         "type": "logistic",
         "features": FEATURE_NAMES,
+        "winsor_lo": [round(float(v), 6) for v in lo],
+        "winsor_hi": [round(float(v), 6) for v in hi],
         "mean": [round(float(v), 6) for v in scaler.mean_],
         "scale": [round(float(v), 6) for v in scaler.scale_],
         "coef": [round(float(v), 6) for v in clf.coef_[0]],

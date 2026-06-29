@@ -20,7 +20,7 @@ from poker44.utils.model_manifest import (
     manifest_digest,
 )
 from poker44.validator.synapse import DetectionSynapse
-from poker44_model import score_chunk
+from poker44_model import score_batch
 from poker44_model.capture import save_capture
 
 
@@ -49,8 +49,8 @@ class Miner(BaseMinerNeuron):
             repo_root=repo_root,
             implementation_files=implementation_files,
             defaults={
-                "model_name": "poker7-logistic-v1",
-                "model_version": "1",
+                "model_name": "poker7-logistic-v2",
+                "model_version": "2",
                 "framework": "scikit-learn-logistic",
                 "license": "MIT",
                 "repo_url": "",
@@ -102,7 +102,7 @@ class Miner(BaseMinerNeuron):
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
         """Assign one bot-risk score per chunk using the participant-owned model."""
         chunks = synapse.chunks or []
-        scores = [score_chunk(chunk) for chunk in chunks]
+        scores = score_batch(chunks)
         synapse.risk_scores = scores
         synapse.predictions = [s >= 0.5 for s in scores]
         synapse.model_manifest = dict(self.model_manifest)
