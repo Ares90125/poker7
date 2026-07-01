@@ -17,7 +17,7 @@ import os
 import numpy as np
 import joblib
 
-from poker44_model.features import chunk_features, FEATURE_NAMES
+from poker44_model.features import chunk_features_v4, FEATURE_NAMES
 
 _MODEL = None
 
@@ -43,7 +43,7 @@ def _rank_normalize(vals):
 def _raw_scores(model, chunks):
     rows = []
     for c in chunks:
-        feats = chunk_features(c)          # compute the feature set ONCE per chunk
+        feats = chunk_features_v4(c)       # v3 + seq feature sets, each computed ONCE per chunk
         rows.append([feats.get(k, 0.0) for k in FEATURE_NAMES])
     return model.predict_proba(np.array(rows, dtype=float))[:, 1]
 

@@ -1,8 +1,10 @@
 """Reproducible training for uid7 → writes model.joblib.
 
-v3 features (entropy + cross-hand signatures + dispersion) + an
-ExtraTrees + HistGradientBoosting soft-vote ensemble, trained on ALL labeled
-public-benchmark examples. Requires sklearn (`pip install -e .`).
+v4 features = v3 (entropy + cross-hand signatures + dispersion) CONCAT
+seq-aware features (action n-grams, transition-matrix entropy, actor-alternation,
+bet-sizing runs, street-progression) + an ExtraTrees + HistGradientBoosting
+soft-vote ensemble, trained at NATIVE chunk size on ALL labeled public-benchmark
+dates. Requires sklearn (`pip install -e .`).
 
     python3 poker44_model/train_model.py --data /root/ares/Poker/train/raw
 """
@@ -18,7 +20,7 @@ import joblib
 from sklearn.ensemble import (ExtraTreesClassifier, HistGradientBoostingClassifier,
                               VotingClassifier)
 
-from poker44_model.features import chunk_features, FEATURE_NAMES
+from poker44_model.features import chunk_features_v4, FEATURE_NAMES
 
 
 def load(raw):
@@ -32,13 +34,14 @@ def load(raw):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", required=True, help="path to train/raw chunk JSON dir")
+    ap.add_argument("--data", default="/root/ares/Poker/train/raw",
+                    help="path to train/raw chunk JSON dir")
     args = ap.parse_args()
 
     data = load(args.data)
     rows, y = [], []
     for g, l in data:
-        feats = chunk_features(g)
+        feats = chunk_features_v4(g)   # v3 + seq features, each computed ONCE, at native chunk size
         rows.append([feats.get(k, 0.0) for k in FEATURE_NAMES])
         y.append(l)
     X = np.array(rows, dtype=float)

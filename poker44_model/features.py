@@ -197,4 +197,25 @@ def chunk_features(chunk):
     return out
 
 
-FEATURE_NAMES = sorted(chunk_features([{"metadata": {}, "players": [], "streets": [], "actions": [{"action_type": "x"}]}]).keys())
+V3_FEATURE_NAMES = sorted(chunk_features([{"metadata": {}, "players": [], "streets": [], "actions": [{"action_type": "x"}]}]).keys())
+
+# --- v4 = v3 features CONCAT sequence-aware features --------------------------
+# seq_features contributes action bigram/trigram, transition-matrix entropy,
+# actor-alternation, bet-sizing runs, and street-progression n-grams aggregated
+# across the chunk. Each feature set is computed ONCE per chunk (no quadratic
+# recomputation), then concatenated. FEATURE_NAMES below is the single ordered
+# column list shared by BOTH training (train_model.py) and inference (detector.py).
+from poker44_model.seq_features import group_seq_features, SEQ_FEATURE_NAMES  # noqa: E402
+
+
+def chunk_features_v4(chunk):
+    """v3 chunk features CONCAT seq chunk features. Each computed once."""
+    feats = dict(chunk_features(chunk))          # v3, once
+    feats.update(group_seq_features(chunk))      # seq, once
+    return feats
+
+
+# Ordered, deduplicated column list: v3 columns first, then seq columns.
+# (The two namespaces are disjoint — seq keys are all "seq_*" — so a plain
+# concat is unambiguous; we still guard against accidental collisions.)
+FEATURE_NAMES = list(V3_FEATURE_NAMES) + [c for c in SEQ_FEATURE_NAMES if c not in set(V3_FEATURE_NAMES)]
