@@ -197,25 +197,16 @@ def chunk_features(chunk):
     return out
 
 
-V3_FEATURE_NAMES = sorted(chunk_features([{"metadata": {}, "players": [], "streets": [], "actions": [{"action_type": "x"}]}]).keys())
+# Full v3 chunk-feature vocabulary (reference only; NOT the model input order).
+_ALL_V3_FEATURE_NAMES = sorted(
+    chunk_features([{"metadata": {}, "players": [], "streets": [],
+                     "actions": [{"action_type": "x"}]}]).keys())
 
-# --- v4 = v3 features CONCAT sequence-aware features --------------------------
-# seq_features contributes action bigram/trigram, transition-matrix entropy,
-# actor-alternation, bet-sizing runs, and street-progression n-grams aggregated
-# across the chunk. Each feature set is computed ONCE per chunk (no quadratic
-# recomputation), then concatenated. FEATURE_NAMES below is the single ordered
-# column list shared by BOTH training (train_model.py) and inference (detector.py).
-from poker44_model.seq_features import group_seq_features, SEQ_FEATURE_NAMES  # noqa: E402
-
-
-def chunk_features_v4(chunk):
-    """v3 chunk features CONCAT seq chunk features. Each computed once."""
-    feats = dict(chunk_features(chunk))          # v3, once
-    feats.update(group_seq_features(chunk))      # seq, once
-    return feats
-
-
-# Ordered, deduplicated column list: v3 columns first, then seq columns.
-# (The two namespaces are disjoint — seq keys are all "seq_*" — so a plain
-# concat is unambiguous; we still guard against accidental collisions.)
-FEATURE_NAMES = list(V3_FEATURE_NAMES) + [c for c in SEQ_FEATURE_NAMES if c not in set(V3_FEATURE_NAMES)]
+# v5 (sanitization fix, candidate C2): the v3 feature set MINUS the fragile
+# identity / raw-magnitude aggregates (hero/button action share, raw bet
+# magnitudes amt_mean/std/q90, raw pot magnitudes pot_delta_mean/pot_growth,
+# raw stack magnitudes stack_std/stack_iqr). Those columns go
+# out-of-distribution on the validator-sanitized live feed and collapse the raw
+# predict_proba spread. This is the EXACT column order the committed
+# model.joblib was trained on (v5_sani C2) — do NOT reorder or regenerate.
+FEATURE_NAMES = ["action_count_max", "action_count_mean", "action_count_min", "action_count_q10", "action_count_q50", "action_count_q90", "action_count_std", "action_entropy_max", "action_entropy_mean", "action_entropy_min", "action_entropy_q10", "action_entropy_q50", "action_entropy_q90", "action_entropy_std", "action_run_max_max", "action_run_max_mean", "action_run_max_min", "action_run_max_q10", "action_run_max_q50", "action_run_max_q90", "action_run_max_std", "actor_entropy_max", "actor_entropy_mean", "actor_entropy_min", "actor_entropy_q10", "actor_entropy_q50", "actor_entropy_q90", "actor_entropy_std", "actor_run_max_max", "actor_run_max_mean", "actor_run_max_min", "actor_run_max_q10", "actor_run_max_q50", "actor_run_max_q90", "actor_run_max_std", "actor_switch_rate_max", "actor_switch_rate_mean", "actor_switch_rate_min", "actor_switch_rate_q10", "actor_switch_rate_q50", "actor_switch_rate_q90", "actor_switch_rate_std", "aggr_sh_max", "aggr_sh_mean", "aggr_sh_min", "aggr_sh_q10", "aggr_sh_q50", "aggr_sh_q90", "aggr_sh_std", "bet_sh_max", "bet_sh_mean", "bet_sh_min", "bet_sh_q10", "bet_sh_q50", "bet_sh_q90", "bet_sh_std", "call_sh_max", "call_sh_mean", "call_sh_min", "call_sh_q10", "call_sh_q50", "call_sh_q90", "call_sh_std", "call_to_sh_max", "call_to_sh_mean", "call_to_sh_min", "call_to_sh_q10", "call_to_sh_q50", "call_to_sh_q90", "call_to_sh_std", "check_sh_max", "check_sh_mean", "check_sh_min", "check_sh_q10", "check_sh_q50", "check_sh_q90", "check_sh_std", "fold_sh_max", "fold_sh_mean", "fold_sh_min", "fold_sh_q10", "fold_sh_q50", "fold_sh_q90", "fold_sh_std", "hand_count", "high_actor_entropy_rate", "long_action_hand_rate", "low_action_entropy_rate", "nonzero_amt_sh_max", "nonzero_amt_sh_mean", "nonzero_amt_sh_min", "nonzero_amt_sh_q10", "nonzero_amt_sh_q50", "nonzero_amt_sh_q90", "nonzero_amt_sh_std", "passive_sh_max", "passive_sh_mean", "passive_sh_min", "passive_sh_q10", "passive_sh_q50", "passive_sh_q90", "passive_sh_std", "player_count_max", "player_count_mean", "player_count_min", "player_count_q10", "player_count_q50", "player_count_q90", "player_count_std", "postflop_sh_max", "postflop_sh_mean", "postflop_sh_min", "postflop_sh_q10", "postflop_sh_q50", "postflop_sh_q90", "postflop_sh_std", "pot_monotonic_max", "pot_monotonic_mean", "pot_monotonic_min", "pot_monotonic_q10", "pot_monotonic_q50", "pot_monotonic_q90", "pot_monotonic_std", "preflop_sh_max", "preflop_sh_mean", "preflop_sh_min", "preflop_sh_q10", "preflop_sh_q50", "preflop_sh_q90", "preflop_sh_std", "raise_sh_max", "raise_sh_mean", "raise_sh_min", "raise_sh_q10", "raise_sh_q50", "raise_sh_q90", "raise_sh_std", "raise_to_sh_max", "raise_to_sh_mean", "raise_to_sh_min", "raise_to_sh_q10", "raise_to_sh_q50", "raise_to_sh_q90", "raise_to_sh_std", "seat_util_max", "seat_util_mean", "seat_util_min", "seat_util_q10", "seat_util_q50", "seat_util_q90", "seat_util_std", "sig_action_top_share", "sig_action_unique_share", "sig_actor_top_share", "sig_actor_unique_share", "sig_amtbucket_top_share", "sig_amtbucket_unique_share", "sig_street_top_share", "sig_street_unique_share", "street_count_max", "street_count_mean", "street_count_min", "street_count_q10", "street_count_q50", "street_count_q90", "street_count_std", "street_entropy_max", "street_entropy_mean", "street_entropy_min", "street_entropy_q10", "street_entropy_q50", "street_entropy_q90", "street_entropy_std", "unique_actor_sh_max", "unique_actor_sh_mean", "unique_actor_sh_min", "unique_actor_sh_q10", "unique_actor_sh_q50", "unique_actor_sh_q90", "unique_actor_sh_std"]
