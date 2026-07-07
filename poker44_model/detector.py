@@ -1,24 +1,21 @@
-"""Poker44 bot detector — C2 + linear-head BLEND (poker-c2-linblend).
+"""Poker44 bot detector — pure-tree candidate `poker-xgb-tuned`.
 
-Model: a proba-average BLEND of
-  (a) the C2 ExtraTrees + HistGradientBoosting soft-vote ensemble (keeps C2's
-      benchmark discrimination), and
-  (b) an L1-LogisticRegression on StandardScaler(C2 feats) — a LOW-VARIANCE head
-      that transfers to the validator-sanitized live population far better than
-      the deep trees (which overfit benchmark idiosyncrasy).
-score = 0.6 * C2_proba + 0.4 * linear_proba. See blend_model.Blend / train_blend.py.
-
-Everything else is C2 verbatim: the 180 sanitization-invariant features
-(features.py), training on hands passed through prepare_hand_for_miner
-(train==serve), and WITHIN-BATCH RANK output (matches the ranking-based reward).
+Model: a single **tuned XGBoost gradient-boosted tree** (hist tree method,
+n_estimators=800, max_depth=6, learning_rate=0.02, subsample/colsample 0.8,
+L1+L2 regularized) over C2's 180 sanitization-invariant features. This is a
+PURE GBDT — there is NO linear head. The new-eval live signal (2026-07-07)
+showed the L1-logistic head in the linblend miners consistently costs ~0.15
+reward vs pure trees, so this candidate deliberately keeps a tree-only head,
+distinct in inductive bias from the LightGBM and from C2's ExtraTrees+HGB vote.
 
 IMPORTANT — inference does NOT sanitize. Live chunks arrive already sanitized by
 the validator (prepare_hand_for_miner runs validator-side, per hand). Only
-TRAINING sanitizes raw benchmark hands. Sanitizing again here would
-double-transform, so this path featurizes the incoming chunks directly.
+TRAINING sanitizes raw benchmark hands (see train_model.py). Featurizing the
+incoming chunks directly keeps train==serve.
 
-The trained blend is the committed `model.joblib` (a poker44_model.blend_model.Blend).
-`score_batch(chunks)` returns one rank-based bot-risk score in [0,1] per chunk.
+Output = **within-batch rank**, matching the validator's ranking-based reward.
+`score_batch(chunks)` returns one score in [0,1] per chunk. n_jobs is pinned to
+1 everywhere (n_jobs=-1 deadlocks the axon on batched predict).
 """
 from __future__ import annotations
 
@@ -28,8 +25,6 @@ import numpy as np
 import joblib
 
 from poker44_model.features import chunk_features, FEATURE_NAMES
-# Registering the module so joblib can resolve poker44_model.blend_model.Blend on load.
-from poker44_model import blend_model  # noqa: F401
 
 _MODEL = None
 
@@ -38,6 +33,11 @@ def _model():
     global _MODEL
     if _MODEL is None:
         _MODEL = joblib.load(os.path.join(os.path.dirname(__file__), "model.joblib"))
+        # belt-and-suspenders: never let a deserialized booster fan out threads
+        try:
+            _MODEL.set_params(n_jobs=1)
+        except Exception:
+            pass
     return _MODEL
 
 
