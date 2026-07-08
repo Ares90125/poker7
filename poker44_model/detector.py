@@ -1,27 +1,37 @@
-"""Poker44 bot detector — pure-tree candidate `poker-xgb-tuned`.
+"""Poker44 bot detector — MLP-bag over C2's 180 sanitization-invariant features.
 
-Model: a single **tuned XGBoost gradient-boosted tree** (hist tree method,
-n_estimators=800, max_depth=6, learning_rate=0.02, subsample/colsample 0.8,
-L1+L2 regularized) over C2's 180 sanitization-invariant features. This is a
-PURE GBDT — there is NO linear head. The new-eval live signal (2026-07-07)
-showed the L1-logistic head in the linblend miners consistently costs ~0.15
-reward vs pure trees, so this candidate deliberately keeps a tree-only head,
-distinct in inductive bias from the LightGBM and from C2's ExtraTrees+HGB vote.
+TREE-COLLAPSE FIX. The v5_sani C2 model (ExtraTrees + HistGradientBoosting
+soft-vote) collapses to a near-flat predict_proba on the validator-sanitized live
+feed: those tree ensembles do not extrapolate off the benchmark support, so live
+batches (a shifted, deeper, call-heavier population) get squashed to nearly one
+value -> random within-batch ranking -> median live reward.
+
+This model replaces the tree ensemble with a **bag of standardized Torch MLPs**
+over the SAME 180 features (mlp_bag.BagMLP / mlp_member.TorchMLPClassifier). Inputs
+are standardized on the train mean/std (critical for OOD extrapolation), each
+member early-stops on validation LOSS (not AP) so it learns a spread-preserving
+surface, and 5 seed members are averaged. Offline double-gate vs C2:
+  Gate A (benchmark GroupKFold reward, true labels): 0.839 mean vs C2 0.836 (3 seeds)
+  Gate B (live dup-proxy Spearman): +0.35 mean vs C2 +0.043 (11-12/12 batches positive)
+Gate A is preserved (not the DA mirage, which had a flat Gate A) and Gate B lifts
+sharply -> the live ordering is genuinely more discriminative.
 
 IMPORTANT — inference does NOT sanitize. Live chunks arrive already sanitized by
-the validator (prepare_hand_for_miner runs validator-side, per hand). Only
-TRAINING sanitizes raw benchmark hands (see train_model.py). Featurizing the
-incoming chunks directly keeps train==serve.
-
-Output = **within-batch rank**, matching the validator's ranking-based reward.
-`score_batch(chunks)` returns one score in [0,1] per chunk. n_jobs is pinned to
-1 everywhere (n_jobs=-1 deadlocks the axon on batched predict).
+the validator (prepare_hand_for_miner runs validator-side, per hand). Only TRAINING
+sanitizes raw benchmark hands. Output = within-batch rank (matches the ranking reward).
 """
 from __future__ import annotations
 
 import os
 
 import numpy as np
+
+try:  # bound CPU threads so batched predict stays fast
+    import torch
+    torch.set_num_threads(int(os.environ.get("POKER44_TORCH_THREADS", "4")))
+except Exception:
+    pass
+
 import joblib
 
 from poker44_model.features import chunk_features, FEATURE_NAMES
@@ -33,11 +43,6 @@ def _model():
     global _MODEL
     if _MODEL is None:
         _MODEL = joblib.load(os.path.join(os.path.dirname(__file__), "model.joblib"))
-        # belt-and-suspenders: never let a deserialized booster fan out threads
-        try:
-            _MODEL.set_params(n_jobs=1)
-        except Exception:
-            pass
     return _MODEL
 
 
