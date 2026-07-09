@@ -52,7 +52,7 @@ class Miner(BaseMinerNeuron):
             implementation_files=implementation_files,
             defaults={
                 "model_name": "poker7-mlp",
-                "model_version": "8",
+                "model_version": "9",
                 "framework": "pytorch-mlp-ensemble",
                 "license": "MIT",
                 "repo_url": "",
