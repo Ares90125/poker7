@@ -54,7 +54,7 @@ class Miner(BaseMinerNeuron):
                 "framework": "lightgbm+sklearn-ensemble",
                 "license": "MIT",
                 "repo_url": "",
-                "notes": "Soft-voting ExtraTrees+RandomForest+HistGradientBoosting ensemble over 180 sanitization-invariant behavioral features (poker44_model/); strictly-monotone reward-fit decision layer, deterministic top-10% crossing, no isotonic calibration.",,
+                "notes": "Soft-voting ExtraTrees+RandomForest+HistGradientBoosting ensemble over 180 sanitization-invariant behavioral features (poker44_model/); strictly-monotone reward-fit decision layer, deterministic top-10% crossing, no isotonic calibration.",
                 "open_source": True,
                 "inference_mode": "remote",
                 "training_data_statement": (
